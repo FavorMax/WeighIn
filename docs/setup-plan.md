@@ -85,3 +85,27 @@ explicitly.
   npm run build && npm run build:helper
   node tests/experiments/verify-setup-plan.cjs docs/experiments/setup-plan
   ```
+
+## Retained live evidence
+
+The live proof passed on the pinned protocol-28 standalone Quickstart
+(`LIVE_SETUP_PLAN_PROOF_PASS`, [verification](experiments/setup-plan/verification.json)):
+
+- The callee (`7a8899…c070`) and the caller (`de3403…3f75`) are different WASMs
+  and were deployed as distinct instances. The callee was uploaded and created
+  first even though the caller is declared first, each deployment was submitted
+  once, and all four setup transactions were confirmed `SUCCESS` before the
+  first measured simulation ([setup receipts](experiments/setup-plan/setup-receipts.json)).
+- The committed callee create return decodes to the callee address. The caller's
+  measured `run` received exactly that ScVal XDR as its first argument. The
+  native footprint of that single caller invocation includes the callee
+  instance and writes the callee's `counter` entry, so the nested host call was
+  real ([caller invocation](experiments/setup-plan/caller-invocation.json)).
+- Live failure probes ([failure probes](experiments/setup-plan/failure-probes.json)):
+  - An `index` selector on the address return failed with
+    `$ is scvAddress, not a vec` before the caller was simulated.
+  - A callee artifact that the network rejects at upload
+    (`Error(WasmVm, InvalidAction)`) submitted nothing and aborted `id:caller`.
+
+`tests/setup-plan.test.cjs` checks the retained files against `sha256.json`
+and the WASM hashes on every `npm test`.

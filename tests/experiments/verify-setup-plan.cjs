@@ -66,7 +66,10 @@ rpc.Server.prototype.getTransaction = async function(hash) {
 let simulations = [];
 const simulateOriginal = rpc.Server.prototype.simulateTransaction;
 rpc.Server.prototype.simulateTransaction = async function(transaction) {
-  const invoke = transaction.operations[0].func.invokeContract();
+  // prepareTransaction also simulates upload/create; record only invocations.
+  const func = transaction.operations[0].func;
+  if (func.switch().name !== 'hostFunctionTypeInvokeContract') return simulateOriginal.call(this, transaction);
+  const invoke = func.invokeContract();
   timeline.push('simulate');
   simulations.push({
     contract_id: Address.fromScAddress(invoke.contractAddress()).toString(),
@@ -169,7 +172,7 @@ function footprintContracts(keys) {
   write('environment.json', {
     node: process.version,
     platform: `${process.platform}-${process.arch}`,
-    stellar_sdk: require('@stellar/stellar-sdk/package.json').version,
+    stellar_sdk: JSON.parse(fs.readFileSync(path.join(repository, 'package-lock.json'), 'utf8')).packages['node_modules/@stellar/stellar-sdk'].version,
     quickstart_image: capture('docker', ['inspect', '--format', '{{.Config.Image}}', 'stellar-quickstart']),
     rpc_url: endpoint,
     network_passphrase: network.passphrase,
@@ -240,7 +243,7 @@ function footprintContracts(keys) {
     nested_call_writes_callee_counter: footprint.storage.some(entry => entry.contract === calleeRecord.contract_id && entry.key === 'counter'),
     nested_call_returns_callee_result: retval.switch().name === 'scvVec' && retval.vec()[0].u32() === 1,
     malformed_path_fails_before_dependent_invocation: /Cannot resolve binding to "callee": \$ is scvAddress, not a vec/.test(malformedError ?? '') && !malformed.simulated.includes('run'),
-    failed_prerequisite_aborts_dependent: /aborted dependents: id:caller/.test(prerequisiteError ?? '') && prerequisite.submissions.length === 1 && prerequisite.simulated.length === 0,
+    failed_prerequisite_aborts_dependent: /aborted dependents: id:caller/.test(prerequisiteError ?? '') && prerequisite.submissions.length === 0 && prerequisite.simulated.length === 0,
   };
   for (const [name, passed] of Object.entries(checks)) assert.equal(passed, true, name);
   write('verification.json', {

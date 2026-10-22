@@ -355,3 +355,35 @@ test("the README dependency example parses and deploys the bound dependency firs
   assert.deepEqual(order(spec), ["id:token", "id:pool"]);
   assert.deepEqual(spec.contracts[0].invocations[0].args[0], { type: "address", binding: { contract: "token" } });
 });
+
+test("retained live proof shows two WASMs deployed in order with a real bound cross-contract call", () => {
+  const directory = path.join(__dirname, "../docs/experiments/setup-plan");
+  const read = (name) => JSON.parse(fs.readFileSync(path.join(directory, name), "utf8"));
+  const sha = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  for (const [file, expected] of Object.entries(read("sha256.json"))) assert.equal(sha(path.join(directory, file)), expected, file);
+
+  const proof = read("verification.json");
+  assert.equal(proof.status, "LIVE_SETUP_PLAN_PROOF_PASS");
+  for (const [check, passed] of Object.entries(proof.checks)) assert.equal(passed, true, check);
+  const nested = path.join(__dirname, "../docs/experiments/nested-invocation");
+  assert.equal(sha(path.join(nested, "nested-callee.wasm")), proof.wasm_sha256.callee);
+  assert.equal(sha(path.join(nested, "nested-caller.wasm")), proof.wasm_sha256.caller);
+  assert.notEqual(proof.wasm_sha256.callee, proof.wasm_sha256.caller);
+
+  const receipts = read("setup-receipts.json");
+  assert.deepEqual(receipts.setup_order.map((step) => step.artifact), ["callee", "callee", "caller", "caller"]);
+  const [calleeReturn] = receipts.committed_returns;
+  assert.equal(Address.fromScVal(xdr.ScVal.fromXDR(calleeReturn.return_xdr, "base64")).toString(), proof.runtime_contract_ids.callee);
+
+  const { simulation, native_footprint } = read("caller-invocation.json");
+  assert.equal(simulation.contract_id, proof.runtime_contract_ids.caller);
+  assert.equal(simulation.args_xdr[0], calleeReturn.return_xdr, "the committed return is passed unchanged");
+  assert.ok(native_footprint.instances.includes(proof.runtime_contract_ids.callee));
+  assert.ok(native_footprint.storage.some((entry) => entry.contract === proof.runtime_contract_ids.callee && entry.key === "counter"));
+
+  const probes = read("failure-probes.json");
+  assert.match(probes.malformed_binding_path.error, /\$ is scvAddress, not a vec/);
+  assert.deepEqual(probes.malformed_binding_path.simulated, []);
+  assert.match(probes.failed_prerequisite.error, /Setup of id:callee failed; aborted dependents: id:caller/);
+  assert.deepEqual(probes.failed_prerequisite.submissions, []);
+});
